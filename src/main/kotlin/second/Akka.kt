@@ -10,13 +10,14 @@ import java.math.BigInteger
 data class Number(val listOfNumbers: MutableList<BigInteger>)
 
 class Start
+class Finish
 
 fun main(args:Array<String>) {
     val startTime = System.currentTimeMillis()
     val system = ActorSystem.create("MySystem") //создаем систему акторов
     val masterActor = system.actorOf(Props.create(MasterActor::class.java),
             "master") //создаем главого актора
-    masterActor.tell(Start(), null) //сообщаем главному актору о начале работы
+    masterActor.tell(Start(), masterActor) //сообщаем главному актору о начале работы
 
     //при окончании работы всех акторов выводим результат
     system.whenTerminated.thenRun { ->
@@ -44,9 +45,10 @@ class DownloaderActor: UntypedAbstractActor() {
                     val fact = arrayListOf<Int>() //очищаем
                     factorization(el, fact)
                 }
+                sender.tell(Finish(),self)
                 println("I finished")
-                context.system.terminate() //говорим об окончании работы
             }
+
         }
     }
 }
@@ -56,23 +58,28 @@ class DownloaderActor: UntypedAbstractActor() {
  */
 class MasterActor: UntypedAbstractActor() {
 
-    private val actorsCount = 6 //говорим, сколько потоков должны выполнять текущее задание
+    private val actorsCount = 10 //говорим, сколько потоков должны выполнять текущее задание
     private val worker = context.actorOf(RoundRobinPool(actorsCount).props(Props.create(DownloaderActor::class.java)),
                                         "downloader")
-
+    var count = 0
+    private var chunks: List<List<BigInteger>>? = mutableListOf()
     override fun onReceive(message: Any?) {
         when(message) {
             is Start -> {
-                val listOfNumbers = getData("data.txt").toMutableList() //берем данне
-                val n = listOfNumbers.size
-                //создаем список списков, что передаются в каждом сообщении
-                val resultList = createDataForActors(listOfNumbers, actorsCount, n)
-
+                val listOfNumbers = getData("data.txt").toMutableList() //берем данные
+                chunks = listOfNumbers.chunked(listOfNumbers.size/actorsCount)
                 //создаем сообщения
-                for (list in resultList){
-                    worker.tell(Number(list), self)
+                for (list in chunks!!){
+                   worker.tell(Number(list.toMutableList()), self)
                 }
             }
+            is Finish -> {
+                count++;
+                if(count == chunks!!.size)
+                    self.tell("",null)
+            }
+            else -> context.system.terminate()
+
         }
     }
 }
